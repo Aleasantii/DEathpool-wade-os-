@@ -1,0 +1,8 @@
+{
+  "name": "Wade OS - Deadpool Desktop Simulator",
+  "description": "Interactive operating system desktop simulator inspired by Wade Wilson (Deadpool), featuring mercenary bounty hitlists, X-Force chatterbox, weapon locker, Wham! audio player, TVA multiverse portal, soundboard, and fourth-wall breaking easter eggs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
