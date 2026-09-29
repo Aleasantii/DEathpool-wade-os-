@@ -25,17 +25,21 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { HologramOrb } from './HologramOrb';
-import { BenchmarkComparisonView } from './BenchmarkComparisonView';
 import { DeadpoolClock } from '../desktop/DeadpoolClock';
 import { CommunityAgentsHub } from './CommunityAgentsHub';
 import { TacticalTaskList } from './TacticalTaskList';
 import { NeuralBrainView } from './NeuralBrainView';
+import { GoogleWorkspaceView } from './GoogleWorkspaceView';
+import { MultimodalVisionHub } from './MultimodalVisionHub';
 import { 
   playGunshot, 
   playChimichangaCrunch, 
   playUiClick, 
   playTvaZap, 
-  playSwordClash 
+  playSwordClash,
+  playEmphasisCue,
+  startPeriodicFillerSounds,
+  stopPeriodicFillerSounds
 } from '../../utils/audio';
 
 export type CognitiveMode = 
@@ -111,7 +115,9 @@ export const DeadpoolAssistant: React.FC = () => {
   // Drawers & Modals
   const [isTextDrawerOpen, setIsTextDrawerOpen] = useState(false);
   const [isDetailsDrawerOpen, setIsDetailsDrawerOpen] = useState(false);
-  const [detailsTab, setDetailsTab] = useState<'brain' | 'tasks' | 'community_agents' | 'history' | 'focus_log' | 'tools' | 'benchmark'>('brain');
+  const [detailsTab, setDetailsTab] = useState<
+    'brain' | 'tasks' | 'community_agents' | 'workspace' | 'multimodal' | 'history' | 'focus_log' | 'tools'
+  >('brain');
 
   // Input & History
   const [textInput, setTextInput] = useState('');
@@ -502,19 +508,32 @@ export const DeadpoolAssistant: React.FC = () => {
     const utterance = new SpeechSynthesisUtterance(clean);
 
     // Apply specific tone modifications (Ryan Reynolds Deadpool, Wolverine, Panic, Tactical)
+    let basePitch = 1.04;
+    let baseRate = 1.14;
+
     if (voiceTone === 'deadpool') {
-      utterance.rate = 1.14; // Snarky, witty, fast-paced
-      utterance.pitch = 1.04;
+      baseRate = 1.14; // Snarky, witty, fast-paced
+      basePitch = 1.04;
     } else if (voiceTone === 'wolverine') {
-      utterance.rate = 0.92; // Deep, slow, gritty
-      utterance.pitch = 0.82;
+      baseRate = 0.92; // Deep, slow, gritty
+      basePitch = 0.82;
     } else if (voiceTone === 'panic') {
-      utterance.rate = 1.25; // Hyperventilating
-      utterance.pitch = 1.12;
+      baseRate = 1.25; // Hyperventilating
+      basePitch = 1.12;
     } else {
-      utterance.rate = 1.0;
-      utterance.pitch = 0.96;
+      baseRate = 1.0;
+      basePitch = 0.96;
     }
+
+    // Dynamic Tone Modulation for Emphasis (Higher pitch on figures, metrics, conclusions)
+    const hasKeyFiguresOrConclusions = /\b(\d+([.,]\d+)?%?|conclusión|crítico|éxito|total|cifra|resultado|alerta)\b/i.test(clean);
+    if (hasKeyFiguresOrConclusions) {
+      basePitch = Math.min(1.35, basePitch + 0.1);
+      playEmphasisCue();
+    }
+
+    utterance.rate = baseRate;
+    utterance.pitch = basePitch;
 
     const bestVoice = naturalVoiceRef.current || findBestNaturalVoice();
     if (bestVoice) utterance.voice = bestVoice;
@@ -739,6 +758,26 @@ export const DeadpoolAssistant: React.FC = () => {
       } catch (e) {}
     }
 
+    // Voice shortcuts for Google Workspace Suite
+    if (/(workspace|google drive|drive|gmail|correos|calendario|agenda|contactos)/i.test(lower)) {
+      setDetailsTab('workspace');
+      setIsDetailsDrawerOpen(true);
+      const ack = 'Abriendo Google Workspace: Google Drive, Gmail, Calendario y Contactos conectados.';
+      setCurrentCaption(ack);
+      speakVoice(ack);
+      return;
+    }
+
+    // Voice shortcuts for Multimodal Vision & Web Tools
+    if (/(visión|ocr|captura|código qr|qr|quitar fondo|eliminar fondo|cupones|scraping|hoja de cálculo|csv)/i.test(lower)) {
+      setDetailsTab('multimodal');
+      setIsDetailsDrawerOpen(true);
+      const ack = 'Abriendo Centro Multimodal y Herramientas Inteligentes: Visión artificial, OCR y utilidades web.';
+      setCurrentCaption(ack);
+      speakVoice(ack);
+      return;
+    }
+
     // Fire brain synapse in background
     fetch('/api/brain/synapse', {
       method: 'POST',
@@ -748,6 +787,8 @@ export const DeadpoolAssistant: React.FC = () => {
 
     setCognitiveState('ANALYZING');
     setCurrentCaption(`Procesando: "${trimmed}"`);
+    // Start cognitive "thinking" filler sounds ("Ajam", soft breath)
+    startPeriodicFillerSounds();
 
     setConversation((prev) => [
       ...prev,
@@ -807,6 +848,7 @@ export const DeadpoolAssistant: React.FC = () => {
     } catch (e) {
       setCurrentCaption('Error en la comunicación neural. Sus archivos continúan protegidos.');
     } finally {
+      stopPeriodicFillerSounds();
       if (!isFocusActive && !isSpeaking) {
         setCognitiveState('STANDBY');
       }
@@ -980,6 +1022,34 @@ export const DeadpoolAssistant: React.FC = () => {
             className="px-2.5 py-1.5 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 border border-white/[0.08] transition-colors"
           >
             🌮 {tacos}
+          </button>
+
+          {/* Google Workspace Suite Trigger */}
+          <button
+            onClick={() => {
+              playUiClick();
+              setDetailsTab('workspace');
+              setIsDetailsDrawerOpen(true);
+            }}
+            title="Google Workspace (Drive, Gmail, Calendar, Contacts)"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-red-950/60 hover:bg-red-900/70 text-red-300 border border-red-500/30 text-xs font-mono font-semibold transition-colors"
+          >
+            <span>📁</span>
+            <span className="hidden md:inline">Workspace</span>
+          </button>
+
+          {/* Multimodal Vision & Tools Hub Trigger */}
+          <button
+            onClick={() => {
+              playUiClick();
+              setDetailsTab('multimodal');
+              setIsDetailsDrawerOpen(true);
+            }}
+            title="Visión Artificial, OCR, Web y Archivos"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-purple-950/60 hover:bg-purple-900/70 text-purple-300 border border-purple-500/30 text-xs font-mono font-semibold transition-colors"
+          >
+            <span>👁️</span>
+            <span className="hidden md:inline">Visión & Tools</span>
           </button>
 
           {/* Details Drawer Trigger */}
@@ -1324,6 +1394,22 @@ export const DeadpoolAssistant: React.FC = () => {
                 📋 Tareas
               </button>
               <button
+                onClick={() => setDetailsTab('workspace')}
+                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 flex items-center gap-1 ${
+                  detailsTab === 'workspace' ? 'bg-red-950 text-red-300 font-bold border border-red-500/40 shadow' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                📁 Workspace
+              </button>
+              <button
+                onClick={() => setDetailsTab('multimodal')}
+                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 flex items-center gap-1 ${
+                  detailsTab === 'multimodal' ? 'bg-purple-950 text-purple-300 font-bold border border-purple-500/40 shadow' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                👁️ Visión & Web
+              </button>
+              <button
                 onClick={() => setDetailsTab('community_agents')}
                 className={`py-1 px-2.5 rounded text-center transition-all shrink-0 ${
                   detailsTab === 'community_agents' ? 'bg-zinc-800 text-rose-300 font-bold shadow' : 'text-zinc-400'
@@ -1355,15 +1441,21 @@ export const DeadpoolAssistant: React.FC = () => {
               >
                 Sistema
               </button>
-              <button
-                onClick={() => setDetailsTab('benchmark')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 ${
-                  detailsTab === 'benchmark' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400'
-                }`}
-              >
-                Benchmark
-              </button>
             </div>
+
+            {/* Tab: Google Workspace Suite */}
+            {detailsTab === 'workspace' && (
+              <div className="flex-1 overflow-hidden">
+                <GoogleWorkspaceView />
+              </div>
+            )}
+
+            {/* Tab: Multimodal Vision & Tools Hub */}
+            {detailsTab === 'multimodal' && (
+              <div className="flex-1 overflow-hidden">
+                <MultimodalVisionHub />
+              </div>
+            )}
 
             {/* Tab: Neural Brain View */}
             {detailsTab === 'brain' && (
@@ -1544,13 +1636,6 @@ export const DeadpoolAssistant: React.FC = () => {
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* Tab 4: Benchmark */}
-            {detailsTab === 'benchmark' && (
-              <div className="flex-1 overflow-y-auto">
-                <BenchmarkComparisonView />
               </div>
             )}
           </div>

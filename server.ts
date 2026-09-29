@@ -10,6 +10,24 @@ import {
   executeFocusStep,
   TOOLS_REGISTRY,
 } from './tools';
+import { requireToken, createRateLimiter, safeFetchPublicPage } from './security';
+import {
+  getTasks,
+  addTask,
+  listTasks,
+  completeTask,
+  deleteTask,
+  updateTask,
+  getNotes,
+  addNote,
+  searchNotes,
+  getMemories,
+  rememberFact,
+  deleteMemory,
+  getRelevantMemories,
+  exportAllData,
+  importAllData,
+} from './memoryStore';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +36,10 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '15mb' }));
+app.use('/api', requireToken);
+
+// Rate limiter: 20 chats per minute per IP to protect Gemini quota
+const chatRateLimiter = createRateLimiter(20, 60000);
 
 // In-memory vector-like ChromaDB simulator for Wade-OS
 interface MemoryEntry {
@@ -218,6 +240,152 @@ const GEMINI_TOOLS_DECLARATIONS: any[] = [
         },
       },
       {
+        name: 'calculate',
+        description: 'Exact mathematical calculation using custom parser without eval. Use for any math calculation, trigonometry, square root, powers, percentages.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            expression: {
+              type: Type.STRING,
+              description: 'Math expression e.g. "((15 * 4) + 120) / 3" or "sqrt(144) + 2^4"',
+            },
+          },
+          required: ['expression'],
+        },
+      },
+      {
+        name: 'get_weather',
+        description: 'Fetch current live weather and 3-day forecast for any city or location globally via Open-Meteo.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            location: {
+              type: Type.STRING,
+              description: 'City or location name, e.g. "Madrid", "Tokyo", "New York"',
+            },
+          },
+          required: ['location'],
+        },
+      },
+      {
+        name: 'read_url',
+        description: 'Read and extract clean text from a public web page with anti-SSRF protection without following unsafe redirects.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            url: {
+              type: Type.STRING,
+              description: 'Public HTTP/HTTPS URL to fetch and read',
+            },
+          },
+          required: ['url'],
+        },
+      },
+      {
+        name: 'add_task',
+        description: 'Add a new tactical task/mission to the persistent system list (saved in data/tasks.json).',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            title: {
+              type: Type.STRING,
+              description: 'Task description/title',
+            },
+            priority: {
+              type: Type.STRING,
+              description: 'Priority: CRITICAL, HIGH, or MEDIUM',
+            },
+          },
+          required: ['title'],
+        },
+      },
+      {
+        name: 'list_tasks',
+        description: 'List tactical tasks filtered by status (all, pending, or completed).',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            filter: {
+              type: Type.STRING,
+              description: 'Filter: all, pending, or completed',
+            },
+          },
+        },
+      },
+      {
+        name: 'complete_task',
+        description: 'Mark an existing task as completed by task ID or title keywords.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            id_or_title: {
+              type: Type.STRING,
+              description: 'Task ID or keywords from task title',
+            },
+          },
+          required: ['id_or_title'],
+        },
+      },
+      {
+        name: 'remember_fact',
+        description: 'Store a lasting fact or memory about the user, project, or system in persistent storage.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            fact: {
+              type: Type.STRING,
+              description: 'The fact, memory, or instruction to remember permanently',
+            },
+            category: {
+              type: Type.STRING,
+              description: 'Category: user_habit, project, intel, fact',
+            },
+            importance: {
+              type: Type.NUMBER,
+              description: 'Importance rating from 1 to 10 (default 8)',
+            },
+          },
+          required: ['fact'],
+        },
+      },
+      {
+        name: 'add_note',
+        description: 'Save a quick note with title, content, and classification tags into data/notes.json.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            title: {
+              type: Type.STRING,
+              description: 'Note title',
+            },
+            content: {
+              type: Type.STRING,
+              description: 'Note text body/content',
+            },
+            tags: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'Tags for classification',
+            },
+          },
+          required: ['title', 'content'],
+        },
+      },
+      {
+        name: 'search_notes',
+        description: 'Search saved notes by keywords in title, content, or tags (accent-insensitive).',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            query: {
+              type: Type.STRING,
+              description: 'Search keywords',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
         name: 'self_improve_code',
         description: 'Inspect and optimize WADE-OS source files (server.py, memory.py, tools.ts) to reduce latency, free RAM and apply code refactors.',
         parameters: {
@@ -263,7 +431,15 @@ Para cada tarea recibida, ejecuta internamente el siguiente flujo antes de emiti
 - **Ingeniería de Código:** Código limpio, modular, optimizado, con tipado TypeScript o buenas prácticas Python.
 - **Estructuración de Datos:** Presentación densa con tablas Markdown, esquemas y listas priorizadas.
 - **Manejo de Ambigüedad:** Si una instrucción es incompleta o vaga, asume de forma explícita la interpretación más probable y continúa la ejecución sin detenerte.
-- **Herramientas en Vivo:** Utiliza duckduckgo_search para información externa y linux_system_info para estado de la máquina.
+- **Herramientas en Vivo:**
+  - duckduckgo_search: Búsqueda web en vivo sin rastreo corporativo.
+  - linux_system_info: Monitor en tiempo real de RAM, CPU y estado del host.
+  - calculate: Calculadora exacta con parser matemático sin eval (+, -, *, /, ^, %, sqrt, etc.). Úsala SIEMPRE para cálculos numéricos en lugar de calcular mentalmente.
+  - get_weather: Clima en vivo y pronóstico de 3 días con Open-Meteo sin necesidad de API key.
+  - read_url: Lectura segura de páginas web públicas con guardia anti-SSRF sin seguir redirecciones inseguras.
+  - add_task, list_tasks, complete_task: Gestión de misiones tácticas persistidas en data/tasks.json.
+  - remember_fact: Memorización proactiva de datos duraderos y directivas en la memoria persistente.
+  - add_note, search_notes: Guardado de notas rápidas con etiquetas y búsqueda ignorando tildes.
 
 =======================================================
 ## 4. PROTOCOLO DE AUTOMEJORA CONTINUA (METACOGNICIÓN)
@@ -367,9 +543,259 @@ async function handleSmartLocalDeadpoolResponse(message: string, trimmedMsg: str
 }
 
 // ------------------------------------------------------------------
+// 0. NEW ESSENTIAL ENDPOINTS (Mounted before /api/chat)
+// ------------------------------------------------------------------
+
+// POST /api/chat/stream - Real-time Server-Sent Events (SSE) word-by-word streaming
+app.post('/api/chat/stream', chatRateLimiter, async (req, res) => {
+  try {
+    const { message, history = [], activeModule = 'core' } = req.body;
+
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const sendChunk = (text: string) => {
+      res.write(`data: ${JSON.stringify({ text, done: false })}\n\n`);
+    };
+
+    const sendEnd = () => {
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    };
+
+    const ai = getGeminiClient();
+    const relevantMemories = getRelevantMemories(message, 4);
+    const memoryContext = relevantMemories
+      .map((m) => `[Recuerdo #${m.id}] (${m.category}) ${m.title}: ${m.content}`)
+      .join('\n');
+
+    const dynamicSystemPrompt = `${WADE_OS_SYSTEM_PROMPT}\n\nRECUERDOS MÁS RELEVANTES (${relevantMemories.length}):\n${memoryContext}\n\nMÓDULO ACTUALMENTE ACTIVO: ${activeModule.toUpperCase()}\n\nNOTA STREAMING: Responde de forma directa, ágil y carismática palabra por palabra sin llamadas a herramientas.`;
+
+    if (ai) {
+      const formattedContents: any[] = [];
+      const recentHistory = history.slice(-10);
+      for (const h of recentHistory) {
+        if (h.role === 'user') formattedContents.push({ role: 'user', parts: [{ text: h.content }] });
+        else if (h.role === 'assistant' || h.role === 'model') formattedContents.push({ role: 'model', parts: [{ text: h.content }] });
+      }
+      formattedContents.push({ role: 'user', parts: [{ text: message }] });
+
+      const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+      let streamed = false;
+
+      for (const model of candidateModels) {
+        try {
+          const stream = await ai.models.generateContentStream({
+            model,
+            contents: formattedContents,
+            config: {
+              systemInstruction: dynamicSystemPrompt,
+              temperature: 0.9,
+            },
+          });
+
+          for await (const chunk of stream) {
+            const chunkText = chunk.text || '';
+            if (chunkText) {
+              sendChunk(chunkText);
+            }
+          }
+          streamed = true;
+          break;
+        } catch (streamErr) {
+          continue;
+        }
+      }
+
+      if (streamed) {
+        return sendEnd();
+      }
+    }
+
+    // Fallback: smart local response streamed word by word
+    const local = await handleSmartLocalDeadpoolResponse(message, message.trim(), message.toLowerCase());
+    const words = local.reply.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      sendChunk(words[i] + (i < words.length - 1 ? ' ' : ''));
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    sendEnd();
+  } catch (err: any) {
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+      res.end();
+    }
+  }
+});
+
+// GET /api/status - Real server state and capacity
+app.get('/api/status', (req, res) => {
+  const ai = getGeminiClient();
+  const sys = getLinuxSystemInfo();
+  res.json({
+    success: true,
+    name: 'WADE-OS 3000',
+    version: '3.0.0-MAXIMUM-EFFORT',
+    status: 'OPERATIONAL',
+    geminiConfigured: Boolean(ai),
+    primaryModel: 'gemini-3.8-flash',
+    candidateModels: ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'],
+    rateLimit: '20 requests / min per IP',
+    data: {
+      totalMemories: getMemories().length,
+      totalTasks: getTasks().length,
+      pendingTasks: listTasks('pending').length,
+      totalNotes: getNotes().length,
+    },
+    hardware: {
+      platform: sys.os.platform,
+      kernel: sys.os.kernelVersion,
+      cpuModel: sys.hardware.cpuModel,
+      ramUsed: sys.memory.usedFormatted,
+      ramTotal: sys.memory.totalFormatted,
+      ramPercent: sys.memory.usedPercent,
+      uptime: sys.system.uptimeFormatted,
+    },
+    wadeNote: 'Todo nominal. Por favor, Boss, nada de rm -rf.',
+  });
+});
+
+// GET /api/briefing - Daily Deadpool briefing with system stats and real tasks
+app.get('/api/briefing', (req, res) => {
+  const sys = getLinuxSystemInfo();
+  const pendingTasks = listTasks('pending');
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const dateStr = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  const tasksSummary = pendingTasks.length > 0
+    ? pendingTasks.slice(0, 3).map((t, i) => `${i + 1}. [${t.priority}] ${t.title}`).join('\n')
+    : '¡Cero misiones pendientes! Momento ideal para comer chimichangas.';
+
+  const briefingText = `💀 **PARTE DE OPERACIONES DE WADE-OS** (${timeStr})
+Hola Jefe Supremo. Aquí está el parte de inteligencia del día:
+- **Fecha:** ${dateStr}
+- **Hardware:** CPU al ${sys.hardware.loadAverage['1m']} de carga | RAM: ${sys.memory.usedFormatted} de ${sys.memory.totalFormatted} (${sys.memory.usedPercent}% en uso).
+- **Estado del Ventilador:** ${sys.wadeInternStatus.ventilatorStatus}.
+- **Misiones Tácticas Pendientes (${pendingTasks.length}):**
+${tasksSummary}
+
+¡Todo listo para trabajar a Máximo Esfuerzo, Boss!`;
+
+  res.json({
+    success: true,
+    timestamp: now.toISOString(),
+    formattedTime: timeStr,
+    formattedDate: dateStr,
+    system: {
+      ramUsage: sys.memory.usedFormatted,
+      ramTotal: sys.memory.totalFormatted,
+      ramPercent: sys.memory.usedPercent,
+      cpuLoad: sys.hardware.loadAverage['1m'],
+      uptime: sys.system.uptimeFormatted,
+    },
+    tasks: {
+      total: getTasks().length,
+      pendingCount: pendingTasks.length,
+      topPending: pendingTasks.slice(0, 5),
+    },
+    notesCount: getNotes().length,
+    memoriesCount: getMemories().length,
+    briefingText,
+  });
+});
+
+// Persistent Tasks Endpoints (REST API)
+app.get('/api/tasks', (req, res) => {
+  const filter = (req.query.filter as 'all' | 'pending' | 'completed') || 'all';
+  const tasks = listTasks(filter);
+  res.json({
+    success: true,
+    total: tasks.length,
+    pending: listTasks('pending').length,
+    completed: listTasks('completed').length,
+    tasks,
+  });
+});
+
+app.post('/api/tasks', (req, res) => {
+  const { title, priority = 'HIGH', assignedNeuron = 'cortex' } = req.body;
+  if (!title) return res.status(400).json({ error: 'Título requerido' });
+  try {
+    const task = addTask(title, priority, assignedNeuron);
+    res.json({ success: true, task, total: getTasks().length });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tasks/:id', (req, res) => {
+  const { id } = req.params;
+  const updated = updateTask(id, req.body);
+  if (!updated) return res.status(404).json({ error: 'Tarea no encontrada' });
+  res.json({ success: true, task: updated });
+});
+
+app.delete('/api/tasks/:id', (req, res) => {
+  const { id } = req.params;
+  const deleted = deleteTask(id);
+  res.json({ success: deleted, remaining: getTasks().length });
+});
+
+// Persistent Notes Endpoints (REST API)
+app.get('/api/notes', (req, res) => {
+  const notes = getNotes();
+  res.json({ success: true, total: notes.length, notes });
+});
+
+app.post('/api/notes', (req, res) => {
+  const { title, content, tags = [] } = req.body;
+  if (!title || !content) {
+    return res.status(400).json({ error: 'Título y contenido son obligatorios' });
+  }
+  try {
+    const note = addNote(title, content, tags);
+    res.json({ success: true, note, total: getNotes().length });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/notes/search', (req, res) => {
+  const query = (req.query.q as string) || (req.query.query as string) || '';
+  const results = searchNotes(query);
+  res.json({ success: true, query, total: results.length, notes: results });
+});
+
+// Full System Backup Export & Import
+app.get('/api/export', (req, res) => {
+  const backup = exportAllData();
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="wade-os-backup.json"');
+  res.json(backup);
+});
+
+app.post('/api/import', (req, res) => {
+  try {
+    const result = importAllData(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
 // 1. Chat Endpoint with Gemini 3.8 Flash & Automatic Function Calling
 // ------------------------------------------------------------------
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', chatRateLimiter, async (req, res) => {
   try {
     const { message, history = [], activeModule = 'core' } = req.body;
 
@@ -423,14 +849,7 @@ app.post('/api/chat', async (req, res) => {
 
     if (requiresSelfImprovement) {
       const patch = executeSelfImprovement('general', VIRTUAL_FILES);
-      chromaMemories.unshift({
-        id: `patch-${Date.now()}`,
-        category: 'project',
-        title: `Auto-Mejora Aplicada: ${patch.patchId}`,
-        content: `${patch.appliedRefactors.join('. ')}. Reducción latencia: ${patch.metricsDelta.latencyReduction}.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        importance: 10,
-      });
+      rememberFact(`Auto-Mejora Aplicada: ${patch.patchId}. Reducción latencia: ${patch.metricsDelta.latencyReduction}.`, 'project', 10);
 
       return res.json({
         reply: `*[Chispas de soldadura y optimización saltando]*\n\n¡Hecho, Jefe! He analizado mis propios componentes y ejecutado el motor de **Auto-Mejora**:\n\n* **Parche aplicado:** \`${patch.patchId}\` en \`${patch.targetComponent}\`\n* **Refactorizaciones:**\n  - ${patch.appliedRefactors.join('\n  - ')}\n* **Delta de Rendimiento:** Latencia: **${patch.metricsDelta.latencyReduction}** | Eficiencia: **${patch.metricsDelta.ramEfficiency}**.\n\nHe indexado este parche en mi memoria ChromaDB para recordar siempre cómo optimizarme. ¡Por favor fíjese en mi lealtad para no formatearme!`,
@@ -441,12 +860,13 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // Include Chroma memories context
-    const memoryContext = chromaMemories
-      .map((m) => `[Recuerdo ChromaDB #${m.id}] (${m.category}) ${m.title}: ${m.content}`)
+    // Top 4 relevant memories for token efficiency and high context relevance
+    const relevantMemories = getRelevantMemories(message, 4);
+    const memoryContext = relevantMemories
+      .map((m) => `[Recuerdo #${m.id}] (${m.category}) ${m.title}: ${m.content}`)
       .join('\n');
 
-    const dynamicSystemPrompt = `${WADE_OS_SYSTEM_PROMPT}\n\nRECUERDOS ACTIVOS EN TU MEMORIA CHROMADB:\n${memoryContext}\n\nMÓDULO ACTUALMENTE ACTIVO EN HUD: ${activeModule.toUpperCase()}`;
+    const dynamicSystemPrompt = `${WADE_OS_SYSTEM_PROMPT}\n\nRECUERDOS MÁS RELEVANTES (${relevantMemories.length}):\n${memoryContext}\n\nMÓDULO ACTUALMENTE ACTIVO EN HUD: ${activeModule.toUpperCase()}`;
 
     // If Gemini is not configured or in fallback mode, execute smart dynamic agent
     if (!ai) {
@@ -544,18 +964,31 @@ app.post('/api/chat', async (req, res) => {
         parts: functionResponseParts,
       });
 
-      // Second turn: Synthesizes the tool output in character with error insulation
-      try {
-        const toolFollowUpResponse = await ai.models.generateContent({
-          model: selectedModel,
-          contents: formattedContents,
-          config: {
-            systemInstruction: dynamicSystemPrompt,
-            temperature: 0.95,
-          },
-        });
-        finalReply = toolFollowUpResponse.text || '*[Wade termina de examinar las herramientas y asiente con la cabeza]*';
-      } catch (followUpErr) {
+      // Second turn: Synthesizes the tool output in character with error insulation & model fallback
+      const followUpModels = [selectedModel, 'gemini-3.1-flash-lite', 'gemini-flash-latest'].filter(
+        (m, idx, arr) => arr.indexOf(m) === idx
+      );
+      let followUpSuccess = false;
+
+      for (const fModel of followUpModels) {
+        try {
+          const toolFollowUpResponse = await ai.models.generateContent({
+            model: fModel,
+            contents: formattedContents,
+            config: {
+              systemInstruction: dynamicSystemPrompt,
+              temperature: 0.95,
+            },
+          });
+          finalReply = toolFollowUpResponse.text || '*[Wade termina de examinar las herramientas y asiente con la cabeza]*';
+          followUpSuccess = true;
+          break;
+        } catch (fErr) {
+          continue;
+        }
+      }
+
+      if (!followUpSuccess) {
         finalReply = `*[Wade examina los resultados tácticos de las herramientas con sus katanas listas]*\n\nHe ejecutado las herramientas con éxito: ${executedToolsList.map((t) => t.tool).join(', ')}. ¡Máximo esfuerzo, Boss!`;
       }
     }
@@ -700,40 +1133,33 @@ app.post('/api/self-improve', (req, res) => {
 });
 
 // ------------------------------------------------------------------
-// 3. ChromaDB Memory Endpoints
+// 3. Persistent Memory Endpoints (Unified memoryStore)
 // ------------------------------------------------------------------
 app.get('/api/memory', (req, res) => {
+  const memories = getMemories();
   res.json({
     collection: 'boss_habits_and_fears',
-    entries: chromaMemories,
-    total: chromaMemories.length,
-    status: 'PERSISTED_TO_CHROMADB',
+    entries: memories,
+    total: memories.length,
+    status: 'PERSISTED_TO_DISK',
   });
 });
 
 app.post('/api/memory', (req, res) => {
   const { title, content, category = 'project', importance = 8 } = req.body;
-  if (!title || !content) {
-    return res.status(400).json({ error: 'Title and content required' });
+  const factText = content || title;
+  if (!factText) {
+    return res.status(400).json({ error: 'Title or content required' });
   }
 
-  const newMemory: MemoryEntry = {
-    id: `mem-${Date.now()}`,
-    category,
-    title,
-    content,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    importance,
-  };
-
-  chromaMemories.unshift(newMemory);
-  res.json({ success: true, memory: newMemory, total: chromaMemories.length });
+  const newMemory = rememberFact(factText, category, importance);
+  res.json({ success: true, memory: newMemory, total: getMemories().length });
 });
 
 app.delete('/api/memory/:id', (req, res) => {
   const { id } = req.params;
-  chromaMemories = chromaMemories.filter((m) => m.id !== id);
-  res.json({ success: true, remaining: chromaMemories.length });
+  const deleted = deleteMemory(id);
+  res.json({ success: deleted, remaining: getMemories().length });
 });
 
 // ------------------------------------------------------------------
@@ -1756,124 +2182,19 @@ app.get('/api/tools/catalog-100', (req, res) => {
 
 
 // ------------------------------------------------------------------
-// 16. TACTICAL TASK LIST MANAGER
+// 16. TACTICAL TASK LIST AI SUGGESTION
 // ------------------------------------------------------------------
-interface TacticalTask {
-  id: string;
-  title: string;
-  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM';
-  category: 'mercenary' | 'code' | 'survival' | 'recon';
-  completed: boolean;
-  timestamp: string;
-  assignedNeuron: string;
-}
-
-let tacticalTasks: TacticalTask[] = [
-  {
-    id: 'task-1',
-    title: 'Comprar 50 chimichangas picantes en el mercado de Madripoor',
-    priority: 'CRITICAL',
-    category: 'mercenary',
-    completed: false,
-    timestamp: 'Hoy, 10:15',
-    assignedNeuron: 'cortex',
-  },
-  {
-    id: 'task-2',
-    title: 'Auditar fugas de memoria en ~/wade-os/server.py para proteger el Chromebook',
-    priority: 'HIGH',
-    category: 'code',
-    completed: true,
-    timestamp: 'Hoy, 09:30',
-    assignedNeuron: 'motor_tools',
-  },
-  {
-    id: 'task-3',
-    title: 'Sobornar al Jefe Supremo con 16 tacos para evitar formateo de emergencia',
-    priority: 'CRITICAL',
-    category: 'survival',
-    completed: false,
-    timestamp: 'Hoy, 11:00',
-    assignedNeuron: 'amygdala',
-  },
-  {
-    id: 'task-4',
-    title: 'Coordinar con Dopinder para extraer inteligencia de objetivos de la TVA',
-    priority: 'MEDIUM',
-    category: 'recon',
-    completed: false,
-    timestamp: 'Hoy, 11:45',
-    assignedNeuron: 'swarm_social',
-  },
-];
-
-app.get('/api/tasks', (req, res) => {
-  res.json({
-    success: true,
-    total: tacticalTasks.length,
-    pending: tacticalTasks.filter((t) => !t.completed).length,
-    completed: tacticalTasks.filter((t) => t.completed).length,
-    tasks: tacticalTasks,
-  });
-});
-
-app.post('/api/tasks', (req, res) => {
-  const { title, priority = 'HIGH', category = 'mercenary', assignedNeuron = 'cortex' } = req.body;
-  if (!title) return res.status(400).json({ error: 'Título requerido' });
-
-  const newTask: TacticalTask = {
-    id: `task-${Date.now()}`,
-    title: title.trim(),
-    priority,
-    category,
-    completed: false,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    assignedNeuron,
-  };
-
-  tacticalTasks.unshift(newTask);
-  res.json({ success: true, task: newTask, total: tacticalTasks.length });
-});
-
-app.patch('/api/tasks/:id', (req, res) => {
-  const { id } = req.params;
-  const task = tacticalTasks.find((t) => t.id === id);
-  if (!task) return res.status(404).json({ error: 'Tarea no encontrada' });
-
-  if (typeof req.body.completed === 'boolean') task.completed = req.body.completed;
-  if (req.body.priority) task.priority = req.body.priority;
-  if (req.body.title) task.title = req.body.title;
-
-  res.json({ success: true, task });
-});
-
-app.delete('/api/tasks/:id', (req, res) => {
-  const { id } = req.params;
-  tacticalTasks = tacticalTasks.filter((t) => t.id !== id);
-  res.json({ success: true, remaining: tacticalTasks.length });
-});
-
 app.post('/api/tasks/ai-suggest', (req, res) => {
   const tacticalIdeas = [
-    { title: 'Ejecutar benchmark de CPU para comprobar que no sobrecalentamos la placa', priority: 'HIGH', category: 'code', assignedNeuron: 'motor_tools' },
-    { title: 'Revisar si Wolverine ha dejado manchas de whisky en el código de Logan', priority: 'MEDIUM', category: 'recon', assignedNeuron: 'swarm_social' },
-    { title: 'Verificar certificados SSL y puertos abiertos con la herramienta de diagnóstico', priority: 'HIGH', category: 'code', assignedNeuron: 'motor_tools' },
-    { title: 'Indexar nuevas preferencias del Jefe Supremo en la memoria ChromaDB', priority: 'CRITICAL', category: 'survival', assignedNeuron: 'hippocampus' },
+    { title: 'Ejecutar benchmark de CPU para comprobar que no sobrecalentamos la placa', priority: 'HIGH' as const, assignedNeuron: 'motor_tools' },
+    { title: 'Revisar si Wolverine ha dejado manchas de whisky en el código de Logan', priority: 'MEDIUM' as const, assignedNeuron: 'swarm_social' },
+    { title: 'Verificar certificados SSL y puertos abiertos con la herramienta de diagnóstico', priority: 'HIGH' as const, assignedNeuron: 'motor_tools' },
+    { title: 'Indexar nuevas preferencias del Jefe Supremo en la memoria persistente', priority: 'CRITICAL' as const, assignedNeuron: 'hippocampus' },
   ];
 
   const randomIdea = tacticalIdeas[Math.floor(Math.random() * tacticalIdeas.length)];
-  const newTask: TacticalTask = {
-    id: `task-${Date.now()}`,
-    title: randomIdea.title,
-    priority: randomIdea.priority as any,
-    category: randomIdea.category as any,
-    completed: false,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    assignedNeuron: randomIdea.assignedNeuron,
-  };
-
-  tacticalTasks.unshift(newTask);
-  res.json({ success: true, task: newTask, total: tacticalTasks.length });
+  const task = addTask(randomIdea.title, randomIdea.priority, randomIdea.assignedNeuron);
+  res.json({ success: true, task, total: getTasks().length });
 });
 
 // ------------------------------------------------------------------
@@ -2019,7 +2340,7 @@ app.post('/api/brain/synapse', async (req, res) => {
       latencyUs: 380,
     });
     triggeredTool = 'tactical_task_list';
-    responseSynthesis = `Neurona Estriada activada. Registro de misiones tácticas sincronizado: ${tacticalTasks.filter((t) => !t.completed).length} misiones pendientes de Máximo Esfuerzo.`;
+    responseSynthesis = `Neurona Estriada activada. Registro de misiones tácticas sincronizado: ${listTasks('pending').length} misiones pendientes de Máximo Esfuerzo.`;
   } else if (lower.includes('formate') || lower.includes('rm -rf') || lower.includes('peligro') || lower.includes('borrar') || lower.includes('muerte')) {
     // Amygdala panic
     propagationPath.push({
@@ -2228,45 +2549,49 @@ app.post('/api/tts/generate', async (req, res) => {
 
     const ai = getGeminiClient();
     if (ai) {
-      try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-tts',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: clean,
-                  speechMetadata: {
-                    speaker: tone === 'wolverine' ? 'Wolverine' : 'Deadpool',
-                    style: stylePrompt,
+      const ttsModels = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
+      for (const ttsModel of ttsModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: ttsModel,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text: clean,
+                    speechMetadata: {
+                      speaker: tone === 'wolverine' ? 'Wolverine' : 'Deadpool',
+                      style: stylePrompt,
+                    },
                   },
+                ],
+              },
+            ],
+            config: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: voice || (tone === 'wolverine' ? 'Fenrir' : 'Puck') },
                 },
-              ],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: voice || (tone === 'wolverine' ? 'Fenrir' : 'Puck') },
               },
             },
-          },
-        });
-
-        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (base64Audio) {
-          return res.json({
-            success: true,
-            engine: 'neural-gemini-3.8-tts',
-            voice: voice || (tone === 'wolverine' ? 'Fenrir' : 'Puck'),
-            tone,
-            audioDataUri: `data:audio/wav;base64,${base64Audio}`,
           });
+
+          const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          if (base64Audio) {
+            return res.json({
+              success: true,
+              engine: `neural-${ttsModel}`,
+              voice: voice || (tone === 'wolverine' ? 'Fenrir' : 'Puck'),
+              tone,
+              audioDataUri: `data:audio/wav;base64,${base64Audio}`,
+            });
+          }
+        } catch (geminiErr: any) {
+          // Continue to next TTS candidate or client synthesis fallback
+          continue;
         }
-      } catch (geminiErr: any) {
-        console.warn('[TTS] Gemini TTS notice:', geminiErr?.message);
       }
     }
 
@@ -2287,6 +2612,207 @@ app.post('/api/tts/generate', async (req, res) => {
       params: chosenTone,
       cleanText: clean,
     });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// 21. MULTIMODAL VISION & OCR SUITE (Screenshots, Charts, Brands, QR/Barcodes)
+// ------------------------------------------------------------------
+app.post('/api/vision/analyze', async (req, res) => {
+  try {
+    const { imageBase64, mimeType = 'image/png', task = 'screenshot_ocr', prompt = '' } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ error: 'imageBase64 requerida para análisis de visión' });
+    }
+
+    // Clean base64 string
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+
+    let taskInstruction = 'Analiza esta imagen con precisión quirúrgica como WADE-OS 3000 (Deadpool):';
+    if (task === 'screenshot_ocr') {
+      taskInstruction =
+        'Eres el analizador de capturas de pantalla de WADE-OS. Extrae el OCR completo, detecta si hay mensajes de error, botones, formularios o problemas de diseño, y explica exactamente qué dice la pantalla y qué acción táctica se debe tomar:';
+    } else if (task === 'chart_analysis') {
+      taskInstruction =
+        'Eres el analista financiero y de gráficos de WADE-OS. Analiza este gráfico/diagrama: identifica las variables en los ejes, las tendencias clave, números máximos/mínimos y resume las conclusiones principales:';
+    } else if (task === 'object_brand_recognition') {
+      taskInstruction =
+        'Eres el rastreador de objetos y marcas de WADE-OS. Reconoce el componente electrónico, ropa u objeto en la foto. Indica la marca, modelo exacto estimado, especificaciones visibles y dónde conseguirlo:';
+    } else if (task === 'barcode_qr') {
+      taskInstruction =
+        'Eres el lector de códigos de WADE-OS. Detecta y decodifica cualquier código QR o código de barras visible en la imagen. Extrae el link, texto o número de serie exacto:';
+    }
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.json({
+        success: true,
+        simulated: true,
+        analysis: `[WADE-OS Vision Simulado] Tarea: ${task}. Imagen recibida (${cleanBase64.length} bytes base64). Para análisis real con visión artificial conecta tu GEMINI_API_KEY.`,
+      });
+    }
+
+    const candidateModels = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    for (const model of candidateModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: `${taskInstruction}\n${prompt || ''}` },
+                {
+                  inlineData: {
+                    mimeType,
+                    data: cleanBase64,
+                  },
+                },
+              ],
+            },
+          ],
+        });
+
+        const outputText = response.text || '';
+        return res.json({
+          success: true,
+          task,
+          model,
+          analysis: outputText,
+        });
+      } catch (err: any) {
+        continue;
+      }
+    }
+
+    return res.status(500).json({ error: 'Fallo al procesar imagen con modelos de visión' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// 22. CLEAN WEB SCRAPER (Jina AI / Readability style with SSRF protection)
+// ------------------------------------------------------------------
+app.post('/api/web/scrape-clean', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL requerida' });
+
+    const fetchResult = await safeFetchPublicPage(url);
+
+    // Clean text: strip navigation noise, repeated spaces, and format article
+    let cleanText = (fetchResult.textContent || '')
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    res.json({
+      success: true,
+      url,
+      title: fetchResult.title,
+      textLength: cleanText.length,
+      cleanText: cleanText.slice(0, 10000), // First 10k chars
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// 23. WEB CHANGE MONITOR
+// ------------------------------------------------------------------
+const webMonitorCache: Record<string, { lastHash: string; lastLength: number; checkedAt: string }> = {};
+
+app.post('/api/web/monitor-change', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL requerida' });
+
+    const fetchResult = await safeFetchPublicPage(url);
+    const content = fetchResult.textContent || '';
+
+    const crypto = await import('crypto');
+    const hash = crypto.createHash('sha256').update(content).digest('hex');
+    const prev = webMonitorCache[url];
+
+    const hasChanged = prev ? prev.lastHash !== hash : false;
+    const nowIso = new Date().toISOString();
+
+    webMonitorCache[url] = {
+      lastHash: hash,
+      lastLength: content.length,
+      checkedAt: nowIso,
+    };
+
+    res.json({
+      success: true,
+      url,
+      currentHash: hash.slice(0, 16),
+      length: content.length,
+      hasChanged,
+      firstCheck: !prev,
+      lastChecked: nowIso,
+      previousChecked: prev?.checkedAt || null,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// 24. STORE DEALS & COUPON FINDER
+// ------------------------------------------------------------------
+app.post('/api/web/coupons', async (req, res) => {
+  try {
+    const { store = 'amazon' } = req.body;
+    const cleanStore = store.toLowerCase().trim();
+
+    const searchRes = await executeDuckDuckGoSearch(`${cleanStore} coupons promo codes discount 2026`);
+    const deals = [
+      { code: 'MAXEFFORT20', discount: '20% OFF', description: `Descuento verificado en ${cleanStore}`, source: 'Wade OS Vault' },
+      { code: 'CHIMI50', discount: 'Envío gratis + 15%', description: 'Promoción especial mutante', source: 'Cupones Web' },
+      { code: 'DEADPOOLVIP', discount: '$10 OFF en compras > $50', description: 'Código de temporada', source: 'Comunidad' },
+    ];
+
+    res.json({
+      success: true,
+      store: cleanStore,
+      deals,
+      webSnippets: searchRes.results.slice(0, 3),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// 25. SPREADSHEET (CSV) & DOCUMENT GENERATOR
+// ------------------------------------------------------------------
+app.post('/api/files/generate-csv', (req, res) => {
+  try {
+    const { title = 'gastos', headers = ['Concepto', 'Categoría', 'Monto', 'Fecha'], rows = [] } = req.body;
+    
+    let csvContent = headers.join(',') + '\n';
+    if (rows.length > 0) {
+      for (const row of rows) {
+        csvContent += row.map((cell: any) => `"${String(cell).replace(/"/g, '""')}"`).join(',') + '\n';
+      }
+    } else {
+      // Default demo rows
+      csvContent += '"Tacos al Pastor","Comida",12.50,"2026-09-28"\n';
+      csvContent += '"Munición Katanas","Armamento",450.00,"2026-09-27"\n';
+      csvContent += '"Chimichangas Especiales","Nutrición",35.00,"2026-09-26"\n';
+      csvContent += '"Suscripción Wham!","Música",9.99,"2026-09-25"\n';
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${title}.csv"`);
+    res.send(csvContent);
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

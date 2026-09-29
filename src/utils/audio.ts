@@ -239,6 +239,141 @@ export function playUiClick() {
   osc.stop(ctx.currentTime + 0.05);
 }
 
+// ----------------------------------------------------
+// Cognitive Thinking Filler Sounds ("Ajam", soft breath/vocal nod)
+// ----------------------------------------------------
+let fillerIntervalId: number | null = null;
+
+export function playThinkingFillerSound(type: 'nod' | 'breath' | 'chime' = 'nod') {
+  if (isMuted) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  if (type === 'nod') {
+    // Vocal-like dual formant "Ajam" / soft throat hum
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+
+    osc1.type = 'sine';
+    osc2.type = 'triangle';
+
+    // Inflect up and down like a conversational nod
+    osc1.frequency.setValueAtTime(145, ctx.currentTime);
+    osc1.frequency.linearRampToValueAtTime(175, ctx.currentTime + 0.12);
+    osc1.frequency.linearRampToValueAtTime(130, ctx.currentTime + 0.28);
+
+    osc2.frequency.setValueAtTime(290, ctx.currentTime);
+    osc2.frequency.linearRampToValueAtTime(350, ctx.currentTime + 0.12);
+    osc2.frequency.linearRampToValueAtTime(260, ctx.currentTime + 0.28);
+
+    filter.type = 'bandpass';
+    filter.frequency.value = 650;
+    filter.Q.value = 3.5;
+
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(masterVolume * 0.15, ctx.currentTime + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.32);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start();
+    osc2.start();
+    osc1.stop(ctx.currentTime + 0.34);
+    osc2.stop(ctx.currentTime + 0.34);
+  } else if (type === 'breath') {
+    // Soft organic breath noise
+    const bufferSize = ctx.sampleRate * 0.3;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.08;
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(800, ctx.currentTime);
+    filter.frequency.linearRampToValueAtTime(400, ctx.currentTime + 0.28);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(masterVolume * 0.06, ctx.currentTime + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    noise.start();
+    noise.stop(ctx.currentTime + 0.3);
+  } else {
+    // Soft cognitive synapse chime
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(520, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(780, ctx.currentTime + 0.15);
+
+    gain.gain.setValueAtTime(masterVolume * 0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.22);
+  }
+}
+
+export function startPeriodicFillerSounds() {
+  stopPeriodicFillerSounds();
+  // Play one immediate sound
+  playThinkingFillerSound('nod');
+  fillerIntervalId = window.setInterval(() => {
+    const sounds: ('nod' | 'breath' | 'chime')[] = ['nod', 'breath', 'chime'];
+    const pick = sounds[Math.floor(Math.random() * sounds.length)];
+    playThinkingFillerSound(pick);
+  }, 2400);
+}
+
+export function stopPeriodicFillerSounds() {
+  if (fillerIntervalId !== null) {
+    clearInterval(fillerIntervalId);
+    fillerIntervalId = null;
+  }
+}
+
+// ----------------------------------------------------
+// Emphasis Tone Modulation (for key metrics and conclusions)
+// ----------------------------------------------------
+export function playEmphasisCue() {
+  if (isMuted) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(440, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.08);
+
+  gain.gain.setValueAtTime(masterVolume * 0.12, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  osc.start();
+  osc.stop(ctx.currentTime + 0.12);
+}
+
 // Cassette synthesizer melody player (Wham! / 80s synth chords)
 let synthLoopId: number | null = null;
 let currentTrackPlaying: string | null = null;

@@ -1,5 +1,14 @@
 import os from 'os';
 import fs from 'fs';
+import { safeFetchPublicPage } from './security';
+import {
+  addTask,
+  listTasks,
+  completeTask,
+  rememberFact,
+  addNote,
+  searchNotes,
+} from './memoryStore';
 
 export interface ToolResult {
   tool: string;
@@ -286,18 +295,22 @@ export function getLinuxSystemInfo(): LinuxSystemInfo {
   const usedPercent = Math.round((usedMem / totalMem) * 100);
   const procMem = process.memoryUsage();
 
-  let formatDangerLevel = 'BAJO (8% - Zona Segura)';
+  const formatDangerLevel =
+    usedPercent > 85
+      ? `CRÍTICO (${usedPercent}% - Carga de Memoria Elevada)`
+      : usedPercent > 65
+      ? `MEDIO (${usedPercent}% - Trabajo Activo)`
+      : `BAJO (${usedPercent}% - Zona Segura)`;
+
   let ventilatorStatus = 'Silencioso y controlado';
-  let commentary = 'El Chromebook está en parámetros óptimos. Cero peligro de purga.';
+  let commentary = `El Chromebook está en parámetros nominales (${usedPercent}% RAM). Cero peligro de purga.`;
 
   if (usedPercent > 85) {
-    formatDangerLevel = 'CRÍTICO (92% - Peligro de Formateo Inminente)';
     ventilatorStatus = 'Turbina al 100%';
-    commentary = '¡Alerta de RAM! Ejecutando limpieza de caché preventiva.';
+    commentary = `¡Alerta de RAM (${usedPercent}%)! Purgado preventivo de heap y buffers.`;
   } else if (usedPercent > 65) {
-    formatDangerLevel = 'MEDIO (45% - Trabajo Activo)';
     ventilatorStatus = 'Ventilador activo';
-    commentary = 'Procesamiento en curso a Máximo Esfuerzo.';
+    commentary = `Procesamiento activo a Máximo Esfuerzo (${usedPercent}% RAM).`;
   }
 
   const userInfo = (() => {
@@ -539,31 +552,35 @@ export async function executeFocusStep(
   const cleanTopic = topic.trim() || 'Optimización general del sistema';
   const lowerTopic = cleanTopic.toLowerCase();
 
-  // If Gemini client is provided and available, try to use it for an intelligent autonomous step
+  // If Gemini client is provided and available, try candidate models with resilience
   if (aiClient) {
-    try {
-      const prompt = `Estás actuando como WADE-OS 3000 (Deadpool AI) ejecutando el CICLO DE TRABAJO AUTÓNOMO #${cycle} en MODO FOCUS sobre la misión: "${cleanTopic}".
+    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    for (const modelName of candidateModels) {
+      try {
+        const prompt = `Estás actuando como WADE-OS 3000 (Deadpool AI) ejecutando el CICLO DE TRABAJO AUTÓNOMO #${cycle} en MODO FOCUS sobre la misión: "${cleanTopic}".
 Genera un resultado de trabajo concreto para este ciclo (máximo 2 párrafos). Incluye lo que investigaste, optimizaste o concluiste de manera técnica y con humor negro de Deadpool sin sermones.`;
 
-      const res = await aiClient.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      });
+        const res = await aiClient.models.generateContent({
+          model: modelName,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
 
-      const text = res.text?.trim();
-      if (text) {
-        return {
-          cycle,
-          topic: cleanTopic,
-          action: `Ciclo #${cycle} completado sobre "${cleanTopic}"`,
-          toolInvoked: 'gemini_focus_engine',
-          resultSummary: text,
-          status: 'EXECUTING',
-          timestamp: time,
-        };
+        const text = res.text?.trim();
+        if (text) {
+          return {
+            cycle,
+            topic: cleanTopic,
+            action: `Ciclo #${cycle} completado sobre "${cleanTopic}"`,
+            toolInvoked: 'gemini_focus_engine',
+            resultSummary: text,
+            status: 'EXECUTING',
+            timestamp: time,
+          };
+        }
+      } catch (e) {
+        // Fallback silently to next candidate model or local execution
+        continue;
       }
-    } catch (e) {
-      console.warn('[FocusEngine] Gemini focus step notice, falling back to local tools:', e);
     }
   }
 
@@ -661,7 +678,251 @@ Genera un resultado de trabajo concreto para este ciclo (máximo 2 párrafos). I
 }
 
 // ------------------------------------------------------------------
-// 5. Central Tool Registry & Dispatcher
+// 5. Safe Math Calculator (Zero eval / Recursive Descent Parser)
+// ------------------------------------------------------------------
+export function safeCalculateMath(expression: string): { expression: string; result: number; formatted: string } {
+  if (!expression || typeof expression !== 'string') {
+    throw new Error('Expresión matemática requerida');
+  }
+
+  const str = expression.trim();
+  let pos = 0;
+
+  function peek(): string {
+    return str[pos] || '';
+  }
+
+  function next(): string {
+    return str[pos++];
+  }
+
+  function skipWhitespace(): void {
+    while (pos < str.length && /\s/.test(str[pos])) {
+      pos++;
+    }
+  }
+
+  function parsePrimary(): number {
+    skipWhitespace();
+    const ch = peek();
+
+    if (ch === '-') {
+      next();
+      return -parsePrimary();
+    }
+    if (ch === '+') {
+      next();
+      return parsePrimary();
+    }
+
+    if (ch === '(') {
+      next();
+      const val = parseExpression();
+      skipWhitespace();
+      if (peek() === ')') {
+        next();
+      } else {
+        throw new Error("Paréntesis de cierre ')' esperado");
+      }
+      return val;
+    }
+
+    // Identifiers: functions or constants
+    if (/[a-zA-Z]/.test(ch)) {
+      let id = '';
+      while (pos < str.length && /[a-zA-Z0-9_]/.test(str[pos])) {
+        id += next();
+      }
+      id = id.toLowerCase();
+      if (id === 'pi') return Math.PI;
+      if (id === 'e') return Math.E;
+
+      skipWhitespace();
+      if (peek() === '(') {
+        next();
+        const arg = parseExpression();
+        skipWhitespace();
+        if (peek() === ')') {
+          next();
+        } else {
+          throw new Error(`Paréntesis de cierre ')' esperado tras función ${id}`);
+        }
+
+        switch (id) {
+          case 'sqrt': return Math.sqrt(arg);
+          case 'abs': return Math.abs(arg);
+          case 'sin': return Math.sin(arg);
+          case 'cos': return Math.cos(arg);
+          case 'tan': return Math.tan(arg);
+          case 'round': return Math.round(arg);
+          case 'floor': return Math.floor(arg);
+          case 'ceil': return Math.ceil(arg);
+          case 'log': return Math.log(arg);
+          case 'log10': return Math.log10(arg);
+          default:
+            throw new Error(`Función no soportada: '${id}'`);
+        }
+      }
+      throw new Error(`Identificador desconocido: '${id}'`);
+    }
+
+    // Number
+    let numStr = '';
+    while (pos < str.length && /[0-9.]/.test(str[pos])) {
+      numStr += next();
+    }
+    if (!numStr) {
+      throw new Error(`Carácter inesperado en cálculo: '${ch}' en pos ${pos}`);
+    }
+    const num = Number(numStr);
+    if (isNaN(num)) {
+      throw new Error(`Número inválido: '${numStr}'`);
+    }
+    return num;
+  }
+
+  function parseFactor(): number {
+    let base = parsePrimary();
+    skipWhitespace();
+    while (peek() === '^') {
+      next();
+      const exponent = parseFactor();
+      base = Math.pow(base, exponent);
+      skipWhitespace();
+    }
+    return base;
+  }
+
+  function parseTerm(): number {
+    let val = parseFactor();
+    skipWhitespace();
+    while (peek() === '*' || peek() === '/' || peek() === '%') {
+      const op = next();
+      const right = parseFactor();
+      if (op === '*') val = val * right;
+      else if (op === '/') {
+        if (right === 0) throw new Error('División por cero no permitida');
+        val = val / right;
+      } else if (op === '%') {
+        val = val % right;
+      }
+      skipWhitespace();
+    }
+    return val;
+  }
+
+  function parseExpression(): number {
+    let val = parseTerm();
+    skipWhitespace();
+    while (peek() === '+' || peek() === '-') {
+      const op = next();
+      const right = parseTerm();
+      if (op === '+') val = val + right;
+      else if (op === '-') val = val - right;
+      skipWhitespace();
+    }
+    return val;
+  }
+
+  const result = parseExpression();
+  skipWhitespace();
+  if (pos < str.length) {
+    throw new Error(`Sintaxis adicional no procesada: '${str.slice(pos)}'`);
+  }
+
+  return {
+    expression,
+    result,
+    formatted: Number.isInteger(result) ? result.toString() : parseFloat(result.toFixed(6)).toString(),
+  };
+}
+
+// ------------------------------------------------------------------
+// 6. Open-Meteo Weather (Zero API key needed)
+// ------------------------------------------------------------------
+const WMO_CODES: Record<number, string> = {
+  0: 'Cielo despejado ☀️',
+  1: 'Mayormente despejado 🌤️',
+  2: 'Parcialmente nublado ⛅',
+  3: 'Nublado ☁️',
+  45: 'Niebla 🌫️',
+  48: 'Niebla escarchada 🌫️',
+  51: 'Llovizna ligera 🌦️',
+  53: 'Llovizna moderada 🌧️',
+  55: 'Llovizna densa 🌧️',
+  61: 'Lluvia leve 🌧️',
+  63: 'Lluvia moderada 🌧️',
+  65: 'Lluvia torrencial ⛈️',
+  71: 'Nevada ligera 🌨️',
+  73: 'Nevada moderada 🌨️',
+  75: 'Nevada copiosa ❄️',
+  80: 'Chubascos leves 🌦️',
+  81: 'Chubascos moderados 🌧️',
+  82: 'Chubascos violentos ⛈️',
+  95: 'Tormenta eléctrica ⚡',
+  96: 'Tormenta con granizo leve ⛈️',
+  99: 'Tormenta con granizo severo ⛈️',
+};
+
+export async function fetchOpenMeteoWeather(location: string): Promise<any> {
+  const cleanLoc = (location || 'Madrid').trim();
+  const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cleanLoc)}&count=1&language=es&format=json`;
+
+  const geoRes = await fetch(geoUrl, {
+    headers: { 'User-Agent': 'WADE-OS/3.0 (Open-Meteo Integration)' },
+    signal: AbortSignal.timeout(6000),
+  });
+
+  if (!geoRes.ok) {
+    throw new Error(`Error en el servicio de geocodificación de Open-Meteo (${geoRes.status})`);
+  }
+
+  const geoData: any = await geoRes.json();
+  if (!geoData.results || geoData.results.length === 0) {
+    throw new Error(`Ubicación '${cleanLoc}' no encontrada en el atlas geográfico.`);
+  }
+
+  const place = geoData.results[0];
+  const { latitude, longitude, name, country } = place;
+
+  const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto`;
+
+  const weatherRes = await fetch(weatherUrl, {
+    headers: { 'User-Agent': 'WADE-OS/3.0 (Weather Service)' },
+    signal: AbortSignal.timeout(6000),
+  });
+
+  if (!weatherRes.ok) {
+    throw new Error(`Error al recuperar datos meteorológicos (${weatherRes.status})`);
+  }
+
+  const weather: any = await weatherRes.json();
+  const curr = weather.current_weather || {};
+  const daily = weather.daily || {};
+
+  const forecast3Days = (daily.time || []).slice(0, 3).map((date: string, i: number) => ({
+    date,
+    maxTemp: `${daily.temperature_2m_max?.[i] ?? '--'}°C`,
+    minTemp: `${daily.temperature_2m_min?.[i] ?? '--'}°C`,
+    precipitation: `${daily.precipitation_sum?.[i] ?? 0} mm`,
+    condition: WMO_CODES[daily.weathercode?.[i]] || 'Variable',
+  }));
+
+  return {
+    location: `${name}${country ? `, ${country}` : ''}`,
+    coordinates: { latitude, longitude },
+    current: {
+      temperature: `${curr.temperature}°C`,
+      windspeed: `${curr.windspeed} km/h`,
+      condition: WMO_CODES[curr.weathercode] || 'Condición variable',
+      time: curr.time,
+    },
+    forecast3Days,
+  };
+}
+
+// ------------------------------------------------------------------
+// 7. Central Tool Registry & Dispatcher
 // ------------------------------------------------------------------
 export const TOOLS_REGISTRY = [
   {
@@ -692,6 +953,163 @@ export const TOOLS_REGISTRY = [
           enum: ['summary', 'full'],
         },
       },
+    },
+  },
+  {
+    name: 'calculate',
+    label: 'Calculadora Matemática Exacta',
+    description: 'Calcula expresiones matemáticas de forma exacta con parser propio sin eval (+, -, *, /, ^, %, sqrt, abs, sin, cos, tan, log).',
+    parameters: {
+      type: 'object',
+      properties: {
+        expression: {
+          type: 'string',
+          description: 'La expresión matemática a evaluar, ej: "((15 * 4) + 120) / 3" o "sqrt(144) + 2^4"',
+        },
+      },
+      required: ['expression'],
+    },
+  },
+  {
+    name: 'get_weather',
+    label: 'Meteorología Open-Meteo',
+    description: 'Obtiene el clima actual y pronóstico de 3 días para cualquier ciudad del mundo mediante Open-Meteo.',
+    parameters: {
+      type: 'object',
+      properties: {
+        location: {
+          type: 'string',
+          description: 'Nombre de la ciudad o localidad, ej: "Madrid", "Ciudad de México", "Buenos Aires", "Tokyo".',
+        },
+      },
+      required: ['location'],
+    },
+  },
+  {
+    name: 'read_url',
+    label: 'Lectura Segura de URL (Anti-SSRF)',
+    description: 'Lee y extrae texto limpio de una página web pública con guardia anti-SSRF sin redirecciones inseguras.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'URL pública completa (http o https) a leer.',
+        },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'add_task',
+    label: 'Agregar Tarea Táctica',
+    description: 'Crea una nueva tarea persistente en el sistema y la almacena en data/tasks.json.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Descripción de la tarea a registrar.',
+        },
+        priority: {
+          type: 'string',
+          description: 'Prioridad: "CRITICAL", "HIGH" o "MEDIUM".',
+          enum: ['CRITICAL', 'HIGH', 'MEDIUM'],
+        },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'list_tasks',
+    label: 'Listar Tareas',
+    description: 'Recupera la lista de tareas tácticas con filtro por estado.',
+    parameters: {
+      type: 'object',
+      properties: {
+        filter: {
+          type: 'string',
+          description: 'Filtro: "all", "pending" o "completed".',
+          enum: ['all', 'pending', 'completed'],
+        },
+      },
+    },
+  },
+  {
+    name: 'complete_task',
+    label: 'Completar Tarea',
+    description: 'Marca una tarea táctica existente como completada mediante su ID o parte de su título.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id_or_title: {
+          type: 'string',
+          description: 'ID exacto o palabras clave del título de la tarea a completar.',
+        },
+      },
+      required: ['id_or_title'],
+    },
+  },
+  {
+    name: 'remember_fact',
+    label: 'Memorizar Dato Persistente',
+    description: 'Almacena un recuerdo o dato duradero sobre el usuario, proyectos o sistema en la memoria a largo plazo.',
+    parameters: {
+      type: 'object',
+      properties: {
+        fact: {
+          type: 'string',
+          description: 'El dato o hecho importante a recordar para futuras conversaciones.',
+        },
+        category: {
+          type: 'string',
+          description: 'Categoría opcional: "user_habit", "project", "intel", "fact".',
+        },
+        importance: {
+          type: 'number',
+          description: 'Nivel de importancia del 1 al 10 (por defecto 8).',
+        },
+      },
+      required: ['fact'],
+    },
+  },
+  {
+    name: 'add_note',
+    label: 'Guardar Nota Rápida',
+    description: 'Guarda una nota con título, contenido y etiquetas en data/notes.json.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Título de la nota.',
+        },
+        content: {
+          type: 'string',
+          description: 'Cuerpo o contenido de la nota.',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Lista de etiquetas para clasificar la nota.',
+        },
+      },
+      required: ['title', 'content'],
+    },
+  },
+  {
+    name: 'search_notes',
+    label: 'Buscar Notas',
+    description: 'Busca notas por palabras clave en título, contenido o etiquetas ignorando tildes y mayúsculas.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Términos de búsqueda.',
+        },
+      },
+      required: ['query'],
     },
   },
   {
@@ -737,6 +1155,128 @@ export async function executeBackendTool(name: string, args: any = {}): Promise<
           data,
           executionTimeMs: elapsed,
           wadeCommentary: `*BEEP-BOOP!* Métricas de su Chromebook extraídas en ${elapsed}ms. Memoria usada: ${data.memory.usedFormatted} de ${data.memory.totalFormatted} (${data.memory.usedPercent}%). ${data.wadeInternStatus.commentary}`,
+        };
+      }
+
+      case 'calculate': {
+        const expression = args.expression || args.expr || '';
+        const data = safeCalculateMath(expression);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'calculate',
+          success: true,
+          data,
+          executionTimeMs: elapsed,
+          wadeCommentary: `*CLIC-CLIC-PUM!* [Wade saca un ábaco con balas de 9mm]\nResultado exacto: ${data.expression} = ${data.formatted}`,
+        };
+      }
+
+      case 'get_weather': {
+        const location = args.location || args.city || 'Madrid';
+        const data = await fetchOpenMeteoWeather(location);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'get_weather',
+          success: true,
+          data,
+          executionTimeMs: elapsed,
+          wadeCommentary: `*Wade mira al cielo con binoculares tácticos*\nClima en ${data.location}: ${data.current.temperature}, ${data.current.condition}. Viento a ${data.current.windspeed}.`,
+        };
+      }
+
+      case 'read_url': {
+        const url = args.url || '';
+        const data = await safeFetchPublicPage(url);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'read_url',
+          success: true,
+          data,
+          executionTimeMs: elapsed,
+          wadeCommentary: `*[Wade infiltra la URL con escudo anti-SSRF]* Leídos ${data.charCount} caracteres de "${data.title}" en ${elapsed}ms.`,
+        };
+      }
+
+      case 'add_task': {
+        const title = args.title || '';
+        const priority = args.priority || 'HIGH';
+        const data = addTask(title, priority);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'add_task',
+          success: true,
+          data,
+          executionTimeMs: elapsed,
+          wadeCommentary: `*[Wade anota en la libreta ensangrentada]* ¡Misión registrada: "${data.title}" con prioridad ${data.priority}!`,
+        };
+      }
+
+      case 'list_tasks': {
+        const filter = args.filter || 'all';
+        const data = listTasks(filter);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'list_tasks',
+          success: true,
+          data: { total: data.length, tasks: data },
+          executionTimeMs: elapsed,
+          wadeCommentary: `*[Wade revisa la lista de misiones]* ${data.length} misiones registradas bajo el filtro '${filter}'.`,
+        };
+      }
+
+      case 'complete_task': {
+        const idOrTitle = args.id_or_title || args.id || args.title || '';
+        const data = completeTask(idOrTitle);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'complete_task',
+          success: data.found,
+          data,
+          executionTimeMs: elapsed,
+          wadeCommentary: data.message,
+        };
+      }
+
+      case 'remember_fact': {
+        const fact = args.fact || '';
+        const category = args.category || 'fact';
+        const importance = typeof args.importance === 'number' ? args.importance : 8;
+        const data = rememberFact(fact, category, importance);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'remember_fact',
+          success: true,
+          data,
+          executionTimeMs: elapsed,
+          wadeCommentary: `*[Wade tatúa el dato en su antebrazo regenerativo]* Guardado en la memoria de WADE-OS: "${data.title}". ¡No lo olvidaré ni aunque me formateen!`,
+        };
+      }
+
+      case 'add_note': {
+        const title = args.title || 'Nota sin título';
+        const content = args.content || '';
+        const tags = Array.isArray(args.tags) ? args.tags : [];
+        const data = addNote(title, content, tags);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'add_note',
+          success: true,
+          data,
+          executionTimeMs: elapsed,
+          wadeCommentary: `Nota "${data.title}" guardada exitosamente en data/notes.json.`,
+        };
+      }
+
+      case 'search_notes': {
+        const query = args.query || '';
+        const data = searchNotes(query);
+        const elapsed = Date.now() - startTime;
+        return {
+          tool: 'search_notes',
+          success: true,
+          data: { total: data.length, notes: data },
+          executionTimeMs: elapsed,
+          wadeCommentary: `Encontradas ${data.length} notas que coinciden con "${query}".`,
         };
       }
 
