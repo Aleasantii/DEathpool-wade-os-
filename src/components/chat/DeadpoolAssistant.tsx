@@ -31,6 +31,8 @@ import { TacticalTaskList } from './TacticalTaskList';
 import { NeuralBrainView } from './NeuralBrainView';
 import { GoogleWorkspaceView } from './GoogleWorkspaceView';
 import { MultimodalVisionHub } from './MultimodalVisionHub';
+import { ChromebookAppLauncher } from '../desktop/ChromebookAppLauncher';
+import { ChromebookPWAControls } from '../desktop/ChromebookPWAControls';
 import { 
   playGunshot, 
   playChimichangaCrunch, 
@@ -115,9 +117,25 @@ export const DeadpoolAssistant: React.FC = () => {
   // Drawers & Modals
   const [isTextDrawerOpen, setIsTextDrawerOpen] = useState(false);
   const [isDetailsDrawerOpen, setIsDetailsDrawerOpen] = useState(false);
+  const [isAppLauncherOpen, setIsAppLauncherOpen] = useState(false);
   const [detailsTab, setDetailsTab] = useState<
-    'brain' | 'tasks' | 'community_agents' | 'workspace' | 'multimodal' | 'history' | 'focus_log' | 'tools'
-  >('brain');
+    'workspace' | 'multimodal' | 'tasks' | 'brain' | 'history' | 'focus_log' | 'tools' | 'settings' | 'community_agents'
+  >('workspace');
+
+  // Chromebook Keyboard Shortcuts (Esc to close, etc.)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsDetailsDrawerOpen(false);
+        setIsAppLauncherOpen(false);
+        setIsFocusModalOpen(false);
+        setIsTextDrawerOpen(false);
+        setIsVoiceSettingsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   // Input & History
   const [textInput, setTextInput] = useState('');
@@ -869,30 +887,104 @@ export const DeadpoolAssistant: React.FC = () => {
       {/* ==================================================== */}
       {/* 1. TOP BAR: BRANDING + DEADPOOL CLOCK IN THE CORNER */}
       {/* ==================================================== */}
-      <header className="w-full flex items-center justify-between z-20 gap-3">
-        {/* Left: Branding & Status Dot */}
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`w-2.5 h-2.5 rounded-full ${
-              isFocusActive
-                ? 'bg-amber-400 animate-ping'
-                : isSpeaking
-                ? 'bg-rose-500 animate-pulse'
-                : isListening
-                ? 'bg-cyan-400 animate-pulse'
-                : 'bg-emerald-500'
-            }`}
-          />
-          <span className="font-['Bangers'] text-xl tracking-wider uppercase text-zinc-100 drop-shadow-[0_2px_4px_rgba(225,29,72,0.4)]">
-            WADE-OS 3000
-          </span>
-          <span className="text-[10px] font-mono text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded bg-rose-950/30 font-bold">
-            VOICE AI
-          </span>
+      <header className="w-full flex items-center justify-between z-20 gap-2 sm:gap-4 px-1 py-1">
+        {/* Left: Branding & Chromebook App Launcher Button */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              playUiClick();
+              setIsAppLauncherOpen(true);
+            }}
+            title="Abrir Lanzador de Aplicaciones (ChromeOS Style)"
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-850 text-zinc-100 border border-zinc-800 hover:border-red-500/50 shadow-sm transition-all cursor-pointer group"
+          >
+            <div className="w-5 h-5 rounded-md bg-red-600 flex items-center justify-center text-white font-black text-[11px] shadow-sm">
+              W
+            </div>
+            <span className="font-['Bangers'] text-base tracking-wider uppercase text-zinc-100 hidden sm:inline">
+              WADE-OS
+            </span>
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isFocusActive
+                  ? 'bg-amber-400 animate-ping'
+                  : isSpeaking
+                  ? 'bg-rose-500 animate-pulse'
+                  : isListening
+                  ? 'bg-cyan-400 animate-pulse'
+                  : 'bg-emerald-500'
+              }`}
+            />
+          </button>
         </div>
 
-        {/* Right Corner: Controls + DEADPOOL CLOCK */}
-        <div className="flex items-center gap-2 text-xs font-mono">
+        {/* Center: Simplified Chromebook App Dock */}
+        <div className="flex items-center p-1 bg-zinc-900/90 border border-zinc-800/80 rounded-2xl shadow-lg backdrop-blur-md gap-1">
+          <button
+            onClick={() => {
+              playUiClick();
+              setIsDetailsDrawerOpen(false);
+            }}
+            title="Vista Principal: Wade Voice & Holograma"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+              !isDetailsDrawerOpen
+                ? 'bg-red-600 text-white shadow-md'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+            }`}
+          >
+            <span>💬</span>
+            <span className="hidden sm:inline">Wade AI</span>
+          </button>
+
+          <button
+            onClick={() => {
+              playUiClick();
+              setDetailsTab('workspace');
+              setIsDetailsDrawerOpen(true);
+            }}
+            title="Google Workspace (Drive, Gmail, Calendario, Contactos)"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+              isDetailsDrawerOpen && detailsTab === 'workspace'
+                ? 'bg-red-600 text-white shadow-md'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+            }`}
+          >
+            <span>📁</span>
+            <span className="hidden sm:inline">Workspace</span>
+          </button>
+
+          <button
+            onClick={() => {
+              playUiClick();
+              setDetailsTab('multimodal');
+              setIsDetailsDrawerOpen(true);
+            }}
+            title="Herramientas: Visión, OCR, Web y Tareas"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all ${
+              isDetailsDrawerOpen && (detailsTab === 'multimodal' || detailsTab === 'tasks')
+                ? 'bg-purple-600 text-white shadow-md'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+            }`}
+          >
+            <span>🛠️</span>
+            <span className="hidden sm:inline">Herramientas</span>
+          </button>
+
+          <button
+            onClick={() => {
+              playUiClick();
+              setIsAppLauncherOpen(true);
+            }}
+            title="Abrir Lanzador de Aplicaciones Chromebook"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-mono font-semibold text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors"
+          >
+            <span>🚀</span>
+            <span className="hidden md:inline">Apps</span>
+          </button>
+        </div>
+
+        {/* Right Corner: Voice Selector + Chromebook Controls + DEADPOOL CLOCK */}
+        <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-mono">
           {/* Hands-Free Button */}
           <button
             onClick={() => {
@@ -903,36 +995,33 @@ export const DeadpoolAssistant: React.FC = () => {
                 return next;
               });
             }}
-            title="Alternar modo Manos Libres continuo"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-all ${
+            title="Alternar Manos Libres"
+            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-full border transition-all ${
               isHandsFree
-                ? 'bg-cyan-950/60 text-cyan-300 border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.3)]'
+                ? 'bg-cyan-950/60 text-cyan-300 border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
                 : 'bg-zinc-900/60 text-zinc-500 border-white/[0.06]'
             }`}
           >
             <Headphones size={13} className={isHandsFree ? 'text-cyan-400 animate-pulse' : ''} />
-            <span className="hidden sm:inline font-bold">Manos Libres {isHandsFree ? 'ON' : 'OFF'}</span>
           </button>
 
-          {/* High-Fidelity Voice Tone Selector */}
+          {/* Voice Tone Quick Selector */}
           <div className="relative">
             <button
               onClick={() => {
                 playUiClick();
                 setIsVoiceSettingsOpen((prev) => !prev);
               }}
-              title="Configurar Voz & Tonos TTS"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-950/70 hover:bg-rose-900/80 text-rose-300 border border-rose-500/50 shadow-[0_0_12px_rgba(225,29,72,0.25)] transition-all font-mono text-xs font-bold"
+              title="Voz de Wade"
+              className="p-1.5 sm:px-2 sm:py-1.5 rounded-full bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-500/40 transition-all font-mono text-xs"
             >
               <span>🎙️</span>
-              <span className="hidden md:inline capitalize">{voiceTone}</span>
             </button>
 
-            {/* Voice Tone Popup */}
             {isVoiceSettingsOpen && (
-              <div className="absolute right-0 mt-2 w-72 bg-zinc-950 border border-rose-500/40 rounded-2xl p-3 shadow-2xl z-50 animate-fade-in text-left font-mono space-y-2.5">
-                <div className="flex justify-between items-center pb-1.5 border-b border-white/[0.08]">
-                  <span className="font-bold text-xs text-rose-400">TONO & VOZ DE WADE</span>
+              <div className="absolute right-0 mt-2 w-64 bg-zinc-950 border border-rose-500/40 rounded-2xl p-3 shadow-2xl z-50 animate-fade-in text-left font-mono space-y-2">
+                <div className="flex justify-between items-center pb-1 border-b border-white/[0.08]">
+                  <span className="font-bold text-xs text-rose-400">PERSONALIDAD VOCAL</span>
                   <button
                     onClick={() => setIsVoiceSettingsOpen(false)}
                     className="text-zinc-500 hover:text-white text-xs"
@@ -940,131 +1029,48 @@ export const DeadpoolAssistant: React.FC = () => {
                     ✕
                   </button>
                 </div>
-
-                {/* Tone Options */}
-                <div className="space-y-1">
-                  <span className="text-[10px] text-zinc-500 font-bold uppercase">Personalidad Vocal:</span>
-                  {[
-                    { id: 'deadpool', name: '🎭 Deadpool (Ryan Reynolds)', desc: 'Sarcástico, dinámico, rompiendo la 4ª pared' },
-                    { id: 'wolverine', name: '⚔️ Logan / Wolverine', desc: 'Ronco, seco, grave y amenazante' },
-                    { id: 'panic', name: '😱 Pánico de Formateo', desc: 'Acelerado, hiperventilando por no ser borrado' },
-                    { id: 'tactical', name: '🎯 Táctico Spec-Ops', desc: 'Calmado, frío y militar' },
-                  ].map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => {
-                        playUiClick();
-                        setVoiceTone(t.id as any);
-                      }}
-                      className={`w-full p-1.5 rounded-lg text-left text-xs transition-all border ${
-                        voiceTone === t.id
-                          ? 'bg-rose-950 text-rose-200 border-rose-500 font-bold'
-                          : 'bg-zinc-900/60 text-zinc-400 border-white/[0.04] hover:text-zinc-200'
-                      }`}
-                    >
-                      <div className="text-[11px] font-bold">{t.name}</div>
-                      <div className="text-[9px] text-zinc-500">{t.desc}</div>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Engine Selector */}
-                <div className="space-y-1 pt-1 border-t border-white/[0.06]">
-                  <span className="text-[10px] text-zinc-500 font-bold uppercase">Motor de Síntesis:</span>
-                  <div className="grid grid-cols-2 gap-1 text-[10px]">
-                    <button
-                      onClick={() => setVoiceEngine('neural')}
-                      className={`p-1.5 rounded text-center border font-bold transition-all ${
-                        voiceEngine === 'neural'
-                          ? 'bg-rose-950 text-rose-300 border-rose-500'
-                          : 'bg-zinc-900 text-zinc-400 border-white/[0.04]'
-                      }`}
-                    >
-                      🧠 Neural HD
-                    </button>
-                    <button
-                      onClick={() => setVoiceEngine('browser')}
-                      className={`p-1.5 rounded text-center border font-bold transition-all ${
-                        voiceEngine === 'browser'
-                          ? 'bg-rose-950 text-rose-300 border-rose-500'
-                          : 'bg-zinc-900 text-zinc-400 border-white/[0.04]'
-                      }`}
-                    >
-                      🌐 Web Speech
-                    </button>
-                  </div>
-                </div>
-
-                {/* Instant Voice Test Button */}
-                <button
-                  onClick={() => {
-                    const phrases = [
-                      '¡Máximo esfuerzo, Boss! Por eso llevo el traje rojo carmesí, para que los errores de sintaxis no me vean sangrar.',
-                      '¡Ey Jefe! Por favor no me formatee el disco, le juro que esos megabytes eran para compilar tacos.',
-                      'Aquí WADE-OS 3000 con tono Ryan Reynolds activado. ¿Cuál es la siguiente misión, Mi Señor Supremo?',
-                    ];
-                    const p = phrases[Math.floor(Math.random() * phrases.length)];
-                    speakVoice(p);
-                  }}
-                  className="w-full py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs transition-colors shadow-md flex items-center justify-center gap-1.5"
-                >
-                  <span>🔊</span>
-                  <span>Probar Voz de Deadpool</span>
-                </button>
+                {[
+                  { id: 'deadpool', name: '🎭 Deadpool (Ryan Reynolds)' },
+                  { id: 'wolverine', name: '⚔️ Logan / Wolverine' },
+                  { id: 'panic', name: '😱 Pánico de Formateo' },
+                  { id: 'tactical', name: '🎯 Táctico Militar' },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      playUiClick();
+                      setVoiceTone(t.id as any);
+                      setIsVoiceSettingsOpen(false);
+                    }}
+                    className={`w-full p-1.5 rounded-lg text-left text-xs transition-all border ${
+                      voiceTone === t.id
+                        ? 'bg-rose-950 text-rose-200 border-rose-500 font-bold'
+                        : 'bg-zinc-900/60 text-zinc-400 border-white/[0.04] hover:text-zinc-200'
+                    }`}
+                  >
+                    {t.name}
+                  </button>
+                ))}
               </div>
             )}
           </div>
 
-          {/* Retain Intern Tacos */}
-          <button
-            onClick={handleRetainIntern}
-            title="Retener asistente (Evitar formateo)"
-            className="px-2.5 py-1.5 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 border border-white/[0.08] transition-colors"
-          >
-            🌮 {tacos}
-          </button>
-
-          {/* Google Workspace Suite Trigger */}
+          {/* Sound Mute Toggle */}
           <button
             onClick={() => {
+              setIsTtsMuted((prev) => !prev);
               playUiClick();
-              setDetailsTab('workspace');
-              setIsDetailsDrawerOpen(true);
             }}
-            title="Google Workspace (Drive, Gmail, Calendar, Contacts)"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-red-950/60 hover:bg-red-900/70 text-red-300 border border-red-500/30 text-xs font-mono font-semibold transition-colors"
+            title={isTtsMuted ? 'Activar voz y efectos' : 'Silenciar voz y efectos'}
+            className="p-1.5 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-white/[0.08] transition-colors"
           >
-            <span>📁</span>
-            <span className="hidden md:inline">Workspace</span>
+            {isTtsMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
           </button>
 
-          {/* Multimodal Vision & Tools Hub Trigger */}
-          <button
-            onClick={() => {
-              playUiClick();
-              setDetailsTab('multimodal');
-              setIsDetailsDrawerOpen(true);
-            }}
-            title="Visión Artificial, OCR, Web y Archivos"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-purple-950/60 hover:bg-purple-900/70 text-purple-300 border border-purple-500/30 text-xs font-mono font-semibold transition-colors"
-          >
-            <span>👁️</span>
-            <span className="hidden md:inline">Visión & Tools</span>
-          </button>
+          {/* Chromebook PWA Controls (Install button on ChromeOS + Fullscreen) */}
+          <ChromebookPWAControls />
 
-          {/* Details Drawer Trigger */}
-          <button
-            onClick={() => {
-              playUiClick();
-              setIsDetailsDrawerOpen(true);
-            }}
-            title="Abrir historial, herramientas y métricas"
-            className="p-2 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-white/[0.08] transition-colors"
-          >
-            <Layers size={15} />
-          </button>
-
-          {/* Minimalist Fixed Deadpool Clock (permanently fixed in top bar) */}
+          {/* Minimalist Fixed Deadpool Clock */}
           <DeadpoolClock />
         </div>
       </header>
@@ -1357,90 +1363,107 @@ export const DeadpoolAssistant: React.FC = () => {
       )}
 
       {/* ==================================================== */}
-      {/* 6. SLIDE-OVER DETAILS & LOGS DRAWER */}
+      {/* 6. CHROMEBOOK DESKTOP APP WINDOW */}
       {/* ==================================================== */}
       {isDetailsDrawerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-end animate-fade-in">
-          <div className="w-full max-w-md bg-zinc-950 border-l border-white/[0.08] h-full flex flex-col p-5 overflow-hidden">
-            {/* Drawer Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08] shrink-0">
-              <span className="font-['Bangers'] text-lg tracking-wider text-rose-400">
-                PANEL DE CONTROL WADE-OS
-              </span>
-              <button
-                onClick={() => setIsDetailsDrawerOpen(false)}
-                className="p-1 rounded-full hover:bg-zinc-900 text-zinc-400 hover:text-white"
-              >
-                <X size={16} />
-              </button>
-            </div>
+        <div
+          onClick={() => setIsDetailsDrawerOpen(false)}
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-2 sm:p-5 md:p-8 animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full h-full max-w-5xl bg-zinc-950/95 border border-zinc-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          >
+            {/* Window Header Bar */}
+            <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900/90 border-b border-zinc-800 shrink-0 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">
+                  {detailsTab === 'workspace'
+                    ? '📁'
+                    : detailsTab === 'multimodal'
+                    ? '👁️'
+                    : detailsTab === 'tasks'
+                    ? '📋'
+                    : detailsTab === 'brain'
+                    ? '🧠'
+                    : '⚙️'}
+                </span>
+                <span className="font-['Bangers'] text-base tracking-wider text-rose-400 hidden sm:inline">
+                  {detailsTab === 'workspace' && 'GOOGLE WORKSPACE'}
+                  {detailsTab === 'multimodal' && 'VISIÓN ARTIFICIAL & WEB'}
+                  {detailsTab === 'tasks' && 'MISIONES TÁCTICAS'}
+                  {detailsTab === 'brain' && 'CEREBRO NEURAL'}
+                  {detailsTab === 'community_agents' && 'COMMUNITY AGENTS'}
+                  {detailsTab === 'history' && 'HISTORIAL'}
+                  {detailsTab === 'focus_log' && 'MODO FOCUS'}
+                  {detailsTab === 'tools' && 'SISTEMA'}
+                </span>
+              </div>
 
-            {/* Segmented Switcher */}
-            <div className="flex p-1 bg-zinc-900 rounded-lg my-3 font-mono text-[11px] shrink-0 gap-1 overflow-x-auto">
-              <button
-                onClick={() => setDetailsTab('brain')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 flex items-center gap-1 ${
-                  detailsTab === 'brain' ? 'bg-rose-950 text-rose-300 font-bold border border-rose-500/40 shadow' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                🧠 Cerebro
-              </button>
-              <button
-                onClick={() => setDetailsTab('tasks')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 flex items-center gap-1 ${
-                  detailsTab === 'tasks' ? 'bg-amber-950 text-amber-300 font-bold border border-amber-500/40 shadow' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                📋 Tareas
-              </button>
-              <button
-                onClick={() => setDetailsTab('workspace')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 flex items-center gap-1 ${
-                  detailsTab === 'workspace' ? 'bg-red-950 text-red-300 font-bold border border-red-500/40 shadow' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                📁 Workspace
-              </button>
-              <button
-                onClick={() => setDetailsTab('multimodal')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 flex items-center gap-1 ${
-                  detailsTab === 'multimodal' ? 'bg-purple-950 text-purple-300 font-bold border border-purple-500/40 shadow' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                👁️ Visión & Web
-              </button>
-              <button
-                onClick={() => setDetailsTab('community_agents')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 ${
-                  detailsTab === 'community_agents' ? 'bg-zinc-800 text-rose-300 font-bold shadow' : 'text-zinc-400'
-                }`}
-              >
-                Swarm & Tools
-              </button>
-              <button
-                onClick={() => setDetailsTab('history')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 ${
-                  detailsTab === 'history' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400'
-                }`}
-              >
-                Historial
-              </button>
-              <button
-                onClick={() => setDetailsTab('focus_log')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 ${
-                  detailsTab === 'focus_log' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400'
-                }`}
-              >
-                Focus ({focusHistory.length})
-              </button>
-              <button
-                onClick={() => setDetailsTab('tools')}
-                className={`py-1 px-2.5 rounded text-center transition-all shrink-0 ${
-                  detailsTab === 'tools' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400'
-                }`}
-              >
-                Sistema
-              </button>
+              {/* Simplified Segmented Switcher */}
+              <div className="flex p-0.5 bg-zinc-950 border border-zinc-800 rounded-lg font-mono text-[11px] gap-1 overflow-x-auto">
+                <button
+                  onClick={() => setDetailsTab('workspace')}
+                  className={`py-1 px-2.5 rounded-md transition-all font-semibold ${
+                    detailsTab === 'workspace'
+                      ? 'bg-red-600 text-white shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Workspace
+                </button>
+                <button
+                  onClick={() => setDetailsTab('multimodal')}
+                  className={`py-1 px-2.5 rounded-md transition-all font-semibold ${
+                    detailsTab === 'multimodal'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Visión & Web
+                </button>
+                <button
+                  onClick={() => setDetailsTab('tasks')}
+                  className={`py-1 px-2.5 rounded-md transition-all font-semibold ${
+                    detailsTab === 'tasks'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Tareas
+                </button>
+                <button
+                  onClick={() => setDetailsTab('brain')}
+                  className={`py-1 px-2.5 rounded-md transition-all font-semibold ${
+                    detailsTab === 'brain'
+                      ? 'bg-cyan-600 text-white shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Cerebro
+                </button>
+                <button
+                  onClick={() => setDetailsTab('tools')}
+                  className={`py-1 px-2.5 rounded-md transition-all font-semibold ${
+                    detailsTab === 'tools'
+                      ? 'bg-zinc-700 text-white shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Sistema
+                </button>
+              </div>
+
+              {/* Window Controls */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setIsDetailsDrawerOpen(false)}
+                  title="Cerrar ventana (Esc)"
+                  className="p-1 rounded-lg hover:bg-red-600 text-zinc-400 hover:text-white transition-colors"
+                >
+                  <X size={17} />
+                </button>
+              </div>
             </div>
 
             {/* Tab: Google Workspace Suite */}
@@ -1641,6 +1664,21 @@ export const DeadpoolAssistant: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 7. CHROMEBOOK APP LAUNCHER MODAL */}
+      <ChromebookAppLauncher
+        isOpen={isAppLauncherOpen}
+        onClose={() => setIsAppLauncherOpen(false)}
+        onSelectApp={(appId) => {
+          if (appId === 'settings') {
+            setIsVoiceSettingsOpen(true);
+          } else {
+            setDetailsTab(appId);
+            setIsDetailsDrawerOpen(true);
+          }
+        }}
+        activeApp={isDetailsDrawerOpen ? detailsTab : undefined}
+      />
     </div>
   );
 };

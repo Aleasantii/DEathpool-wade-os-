@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#18181b"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </radialGradient>
+    <linearGradient id="redMask" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="50%" stop-color="#dc2626"/>
+      <stop offset="100%" stop-color="#991b1b"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded canvas for maskable & standalone icon -->
+  <rect width="512" height="512" rx="100" fill="url(#bg)"/>
+
+  <!-- Outer Mask Ring -->
+  <circle cx="256" cy="256" r="190" fill="url(#redMask)" stroke="#09090b" stroke-width="18" filter="url(#shadow)"/>
+
+  <!-- Central Division Line -->
+  <line x1="256" y1="66" x2="256" y2="446" stroke="#09090b" stroke-width="20" stroke-linecap="round"/>
+
+  <!-- Left Black Eye Patch -->
+  <ellipse cx="180" cy="256" rx="55" ry="95" fill="#09090b" transform="rotate(-12 180 256)"/>
+  <!-- Left White Eye Triangle -->
+  <polygon points="172,215 210,256 210,225" fill="#ffffff"/>
+
+  <!-- Right Black Eye Patch -->
+  <ellipse cx="332" cy="256" rx="55" ry="95" fill="#09090b" transform="rotate(12 332 256)"/>
+  <!-- Right White Eye Triangle -->
+  <polygon points="340,215 302,256 302,225" fill="#ffffff"/>
+</svg>
